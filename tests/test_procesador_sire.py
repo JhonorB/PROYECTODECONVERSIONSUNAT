@@ -3,11 +3,19 @@ import sys
 import pytest
 import pandas as pd
 import openpyxl
+from django.conf import settings
 
-# Asegurar que el directorio raíz del proyecto esté en el sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Asegurar que el directorio raíz del proyecto y backend estén en el sys.path
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BACKEND_DIR = os.path.join(BASE_DIR, 'backend')
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
-from procesador_sire import preparar_dataframes, guardar_excel_final, verificar_deudas
+from backend.api.services.procesador_sire import preparar_dataframes
+from backend.api.services.generador_excel import guardar_excel_final
+from backend.api.services.verificador_deudas import verificar_deudas
 
 
 def test_deteccion_tasa_igv_18_y_10_5(tmp_path):
@@ -30,14 +38,13 @@ def test_deteccion_tasa_igv_18_y_10_5(tmp_path):
 
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
         mes="07",
         cuentas_asignadas=cuentas_asignadas
     )
-    df_forexel, df_docref, ruta_generada, _, _, _, _, _ = res
+    df_forexel = res[0]
 
     assert len(df_forexel) == 2
     # Fila 0: 18%
@@ -66,14 +73,13 @@ def test_asignacion_cencos_cuentas_gasto(tmp_path):
 
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
         mes="07",
         cuentas_asignadas=cuentas_asignadas
     )
-    df_forexel, _, _, _, _, _, _, _ = res
+    df_forexel = res[0]
 
     assert df_forexel.iloc[0]["CTACOM"] == "6311001"
     assert df_forexel.iloc[0]["CENCOS"] == "V0000001"
@@ -97,14 +103,13 @@ def test_tratamiento_boletas_ventas(tmp_path):
 
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="VTA",
         codigo_empresa="0001",
         año="26",
         mes="07",
         subtipo_vta="MERCADERIA"
     )
-    df_forexel, _, _, _, _, _, _, _ = res
+    df_forexel = res[0]
 
     row = df_forexel.iloc[0]
     assert row["TIPDOC"] == "03"
@@ -132,7 +137,6 @@ def test_lectura_csv_distintos_separadores_y_encodings(tmp_path):
 
     res1 = preparar_dataframes(
         str(csv_file1),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
@@ -153,7 +157,6 @@ def test_lectura_csv_distintos_separadores_y_encodings(tmp_path):
 
     res2 = preparar_dataframes(
         str(csv_file2),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
@@ -185,18 +188,19 @@ def test_ordenamiento_notas_credito(tmp_path):
 
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
         mes="07",
         cuentas_asignadas=cuentas_asignadas
     )
-    df_forexel, df_docref, ruta_generada, _, cantidad_nc, _, _, _ = res
+    df_forexel, df_docref, _, cantidad_nc, _, _, _ = res
 
     assert cantidad_nc == 1
     # Guardar Excel final y verificar ordenamiento
-    guardar_excel_final(df_forexel, df_docref, [], "COM", ruta_generada)
+    nombre_excel = "compras_nc_test.xlsx"
+    ruta_relativa = guardar_excel_final(df_forexel, df_docref, [], "COM", nombre_excel)
+    ruta_generada = os.path.join(settings.MEDIA_ROOT, ruta_relativa)
 
     # Leer Excel resultante
     wb = openpyxl.load_workbook(ruta_generada)
@@ -227,14 +231,13 @@ def test_extraccion_contraparte_proveedor_no_empresa(tmp_path):
     # Primera llamada (cuentas_asignadas=None) para obtener la lista de facturas para la UI
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="COM",
         codigo_empresa="0001",
         año="26",
         mes="07",
         cuentas_asignadas=None
     )
-    _, _, _, _, _, _, facturas, _ = res
+    facturas = res[5]
 
     assert len(facturas) == 1
     factura = facturas[0]
@@ -249,7 +252,7 @@ def test_verificar_deudas_sin_tokens():
     y sin hacer peticiones de red si no hay tokens provistos.
     """
     rucs = ["20111111111", "20222222222", "123"] # 123 es RUC inválido
-    resultado = verificar_deudas(rucs, token_apiperu="", token_jsonpe="")
+    resultado = verificar_deudas(rucs)
     assert isinstance(resultado, list)
 
 
@@ -269,14 +272,13 @@ def test_ventas_con_facturas_dolares_y_notas_credito(tmp_path):
 
     res = preparar_dataframes(
         str(csv_file),
-        str(tmp_path),
         tipo="VTA",
         codigo_empresa="0215",
         año="26",
         mes="08",
         subtipo_vta="MERCADERIA"
     )
-    df_forexel, _, _, _, _, _, _, _ = res
+    df_forexel = res[0]
 
     # Factura en USD para FOREXEL / CONCAR / ERGOSOFT se divide entre TC (3643.54 / 3.402 = 1071.00)
     row_usd = df_forexel[df_forexel["NUMERO"] == "515"].iloc[0]
@@ -286,4 +288,3 @@ def test_ventas_con_facturas_dolares_y_notas_credito(tmp_path):
     # Valores originales en soles para el resumen financiero:
     assert float(row_usd["_BI_ORIG"]) == 3643.54
     assert float(row_usd["_IGV_ORIG"]) == 655.84
-
