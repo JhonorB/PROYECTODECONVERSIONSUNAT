@@ -31,3 +31,4 @@ Thumbs.db
 
 # Archivos temporales de scripts (nuestros fix temporales)
 fix_*.py
+.coverage
