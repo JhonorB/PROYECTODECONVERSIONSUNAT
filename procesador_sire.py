@@ -583,8 +583,10 @@ def guardar_excel_final(df_forexel, df_docref, indices_eliminar, tipo, ruta_sali
         df_forexel = df_forexel.drop(index=indices_eliminar, errors='ignore')
         
     # Limpieza final sugerida (sin comillas, sin apóstrofes)
-    df_forexel = df_forexel.replace({'\'': '', '"': ''}, regex=True)
-    df_docref = df_docref.replace({'\'': '', '"': ''}, regex=True)
+    for col in df_forexel.select_dtypes(include=['object', 'string']).columns:
+        df_forexel[col] = df_forexel[col].astype(str).str.replace("'", "", regex=False).str.replace('"', '', regex=False)
+    for col in df_docref.select_dtypes(include=['object', 'string']).columns:
+        df_docref[col] = df_docref[col].astype(str).str.replace("'", "", regex=False).str.replace('"', '', regex=False)
     
     # Mover Notas de Crédito (TIPDOC = 07) al final de la hoja
     df_forexel["_es_nc"] = df_forexel["TIPDOC"].astype(str).str.strip() == "07"
